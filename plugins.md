@@ -118,3 +118,21 @@ LEAF_REGISTER_RELOAD_COMMAND=True
 
 - 日志中提到的 `_hello.json`、`_poke.json` 等特殊词库，以及用户添加的自定义词库，均位于上述 **自定义附加词库目录**。
 - 内置词库 `leaf.json`、`data.json` 位于插件安装目录的 `resource` 文件夹，属于插件自带文件。
+
+#### 编写
+
+参考 [Kyomotoi/AnimeThesaurus](https://github.com/Kyomotoi/AnimeThesaurus) 的 json 字典格式，键是关键词字符串，值是回复列表
+
+**注意：词库要符合 json 格式 如果报解码错误（`UnicodeDecodeError`）先检查自己的词库是不是 无 BOM 的 UTF-8 编码格式**
+
+回复里可以写变量，目前用 `UniMessage.template().format()` 格式化；可以往里写 [Alconna 的扩展控制符](https://nonebot.dev/docs/best-practice/alconna/uniseg#使用消息模板)。
+如果回复中需要用到 `{` 或 `}`，请用 `{{` 或 `}}` 代替。
+插件内建的一些的变量：
+
+- `{user_id}`：发送者 QQ 号
+- `{username}`：发送者昵称（获取失败则默认为 `你`）
+- `{bot_nickname}`：机器人昵称（没有设置则默认为 `可爱的咱`）
+- `{message_id}`: 消息 ID，在戳一戳回复中为 None
+- `{segment}`：用于分割消息，该变量前的文本将会单独为一条消息发送
+- `{at}`: At 消息发送者，是 `{:At(user, user_id)}` 的简写
+- `{reply}`: 回复发送者的消息，是 `{:Reply(message_id)}` 的简写，在戳一戳回复中为 None
