@@ -213,7 +213,7 @@ nb run --reload # 带热重载，修改代码后自动重启
 
 ```bash
 # 后台运行并将日志输出到nonebot.log
-nohup nb run > /root/nonebot.log 2>&1 &
+nohup nb run > ./nonebot.log 2>&1 &
 ```
 
 - 查看实时日志：`tail -f /root/nonebot.log`
