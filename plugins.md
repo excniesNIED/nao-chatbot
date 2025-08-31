@@ -136,3 +136,17 @@ LEAF_REGISTER_RELOAD_COMMAND=True
 - `{segment}`：用于分割消息，该变量前的文本将会单独为一条消息发送
 - `{at}`: At 消息发送者，是 `{:At(user, user_id)}` 的简写
 - `{reply}`: 回复发送者的消息，是 `{:Reply(message_id)}` 的简写，在戳一戳回复中为 None
+
+## [nonebot_plugin_group_welcome](https://github.com/excniesNIED/nonebot_plugin_group_welcome)
+
+## 使用方法
+
+将 `welcome.py` 放置在 NoneBot 项目的 `src/plugins` 目录下。修改第23行的图片显示和第34行的欢迎语即可。
+
+## 注意事项
+
+- 本插件依赖于 `GroupIncreaseNoticeEvent` (群成员增加事件)，请确保你的 OneBot 实现可以正确上报该事件。
+- 图片路径必须是 **绝对路径**，并且Lagrange.OneBot容器或进程需要有该路径的 **读权限**。如果使用 Docker 部署，请确保路径映射正确。
+
+<img src="https://gastigado.cnies.org/d/project_nonebot_plugin_group_welcome/PixPin_2025_08_31_19_45_52.png?sign=kjsczdNeTe5BdbOm1tU-rX5Ls5XefHSDgqOjLsvKnvE=:0" alt="效果图预览" style="zoom: 33%;" />
+
