@@ -118,6 +118,7 @@ LEAF_REGISTER_RELOAD_COMMAND=True
 
 - 日志中提到的 `_hello.json`、`_poke.json` 等特殊词库，以及用户添加的自定义词库，均位于上述 **自定义附加词库目录**。
 - 内置词库 `leaf.json`、`data.json` 位于插件安装目录的 `resource` 文件夹，属于插件自带文件。
+- 戳一戳、非词库内容修改 `const.py` ，然后替换到 `/root/Lagrange.OneBot/nao/.venv/lib/python3.11/site-packages/nonebot_plugin_kawaii_robot` 下的对应文件。
 
 #### 编写
 
@@ -137,15 +138,98 @@ LEAF_REGISTER_RELOAD_COMMAND=True
 - `{at}`: At 消息发送者，是 `{:At(user, user_id)}` 的简写
 - `{reply}`: 回复发送者的消息，是 `{:Reply(message_id)}` 的简写，在戳一戳回复中为 None
 
+### 特殊问题
+
+将`utils.py`、`__main__.py` 替换到 `/root/Lagrange.OneBot/nao/.venv/lib/python3.11/site-packages/nonebot_plugin_kawaii_robot` 下的对应文件。
+
+### 程序崩溃（收不到回复）问题的根源与修复
+
+从你提供的NoneBot日志中，我定位到了一个关键错误：
+
+```
+nonebot_plugin_alconna.uniseg.constraint.SerializeFailed: 在没有机器人实例的情况下无法将通用消息转为对应的适配器消息
+```
+
+这个错误发生在你发送“@小Nao help”之后，源于插件的**复读姬（repeater）功能**。具体来说，问题出在 `nonebot_plugin_kawaii_robot/__main__.py` 文件的 `repeat_rule` 函数中。
+
+#### 问题分析
+
+这个函数在判断消息是否为复读时，尝试将消息转换为 `UniMessage` 格式，但此时程序无法获取到机器人实例（Bot Instance），导致序列化失败并抛出异常。这个异常中断了后续的程序流程，使得你最终收不到或只收到不完整的回复。
+
+#### 解决方案
+
+你需要修改 `nonebot_plugin_kawaii_robot/__main__.py` 文件来修复这个Bug。
+
+**请打开以下文件:**
+`lgc-nb2dev/nonebot-plugin-kawaii-robot/nonebot-plugin-kawaii-robot-4de3a1cf76d24ca34c8a112fa4c519ba6a1a5d80/nonebot_plugin_kawaii_robot/__main__.py`
+
+**找到 `repeat_rule` 函数（大约在第186行）：**
+
+```python
+async def repeat_rule(event: BaseEvent, ss: Uninfo) -> bool:
+    try:
+        raw = event.get_message()
+    except ValueError:
+        return False
+    msg = repr(UniMessage.of(raw)) # <--- 问题行
+    return RepeatInfo.get(ss.scene_path).count(event.get_user_id(), msg)
+```
+
+**将 `msg = repr(UniMessage.of(raw))` 这一行修改为：**
+
+```python
+    msg = str(raw)
+```
+
+修改后的函数如下所示：
+
+```python
+async def repeat_rule(event: BaseEvent, ss: Uninfo) -> bool:
+    try:
+        raw = event.get_message()
+    except ValueError:
+        return False
+    msg = str(raw) # <--- 修改这里
+    return RepeatInfo.get(ss.scene_path).count(event.get_user_id(), msg)
+```
+
+这样修改后，程序将使用更简单的方式获取消息的字符串内容进行复读判断，避免了导致崩溃的序列化错误。
+
+### 问题根源：URL解析冲突
+
+你遇到的新问题是一个非常隐蔽的Bug，它**不在你的词库文件中**（你修改后的JSON文件是完全正确的！），而是在插件处理URL的方式上。
+
+我来为你详细解释一下这次的报错：
+
+```
+ValueError: too many values to unpack (expected 2)
+```
+
+这个错误发生在插件的依赖库 `nonebot-plugin-alconna` 尝试解析你的图片消息时。
+
+- **问题所在**：你的图片URL中包含了`=`符号（例如：`.../xxx.jpg?sign=...`）。
+- **触发过程**：插件的模板功能在解析 `{:Image(url="...")}` 时，会用 `=` 来分割参数名（`url`）和参数值（`"..."`）。但它使用了一个过于简单的分割方法，导致它把你URL里的 `sign=` 也当作了参数分隔符。
+- **导致崩溃**：因此，它试图将 `url="...jpg?sign=..."` 分割成 `键` 和 `值` 两部分，但因为有多个 `=`，分割后得到了超过两部分，程序不知道如何处理，于是就崩溃了。
+
+简单来说，这是插件所依赖的一个底层库在处理带参数的URL时存在的一个缺陷。
+
+#### 解决方案：修改插件代码以绕过此Bug
+
+幸运的是，我们可以通过修改 `nonebot-plugin-kawaii-robot` 插件自身的一个文件来“聪明地”绕过这个Bug，而不需要去动更底层的库。
+
+我们需要修改 `utils.py` 文件，让它在把消息交给底层库之前，手动将图片URL单独处理好。
+
+我将为你提供完整的、已修改好的 `utils.py` 文件。你只需要用下面的内容**完整替换**掉你原来的 `nonebot_plugin_kawaii_robot/utils.py` 文件即可。
+
 ## [nonebot_plugin_group_welcome](https://github.com/excniesNIED/nonebot_plugin_group_welcome)
 
-## 使用方法
+### 使用方法
 
 将 `welcome.py` 放置在 NoneBot 项目的 `src/plugins` 目录下。修改第23行的图片显示和第34行的欢迎语即可。
 
-## 注意事项
+### 注意事项
 
-- 本插件依赖于 `GroupIncreaseNoticeEvent` (群成员增加事件)，请确保你的 OneBot 实现可以正确上报该事件。
+-  本插件依赖于 `GroupIncreaseNoticeEvent` (群成员增加事件)，请确保你的 OneBot 实现可以正确上报该事件。
 - 图片路径必须是 **绝对路径**，并且Lagrange.OneBot容器或进程需要有该路径的 **读权限**。如果使用 Docker 部署，请确保路径映射正确。
 
 <img src="https://gastigado.cnies.org/d/project_nonebot_plugin_group_welcome/PixPin_2025_08_31_19_45_52.png?sign=kjsczdNeTe5BdbOm1tU-rX5Ls5XefHSDgqOjLsvKnvE=:0" alt="效果图预览" style="zoom: 33%;" />
