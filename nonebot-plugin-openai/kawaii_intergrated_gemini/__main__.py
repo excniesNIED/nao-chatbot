@@ -98,6 +98,8 @@ async def _(event: MessageEvent, ss: Session = Depends(get_session)):
             logger.warning("AI 功能未启用或未能生成回复，已跳过。")
             await search_matcher.finish()
 
-        reply_template = "{at}\n" + response_text
-        formatted_messages = await choice_reply_from_ev(ss, [reply_template])
+        reply_template = "{at}\n{ai_response}"
+        formatted_messages = await choice_reply_from_ev(
+            ss, [reply_template], ai_response=response_text
+            )
         await finish_multi_msg(formatted_messages)
