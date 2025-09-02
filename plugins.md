@@ -330,3 +330,52 @@ LLM 相关配置详见 `openai_config.py`
 独立版直接放在 `src/plugins` 即可。
 
 集成版需要将相关文件放在 `/root/Lagrange.OneBot/nao/.venv/lib/python3.11/site-packages/nonebot_plugin_kawaii_robot`。LLM 调用优先级低于词库回答。
+
+Gemini 版本可以使用免费的API。安装Gemini API调用库：
+
+```bash
+pip install google-generativeai
+```
+
+| 特性                              | Gemini 2.5 Flash                                        | Gemini 2.5 Flash-Lite                                 | 关键差异分析                                                 |
+| --------------------------------- | ------------------------------------------------------- | ----------------------------------------------------- | ------------------------------------------------------------ |
+| **核心描述**                      | 价格与性能的最佳平衡                                    | 极致的成本效益和低延迟                                | Flash 是“全能选手”，Flash-Lite 是“速度与成本专家”。          |
+| **输入/输出 Token 限制**          | 输入: 1,048,576<br>输出: 65,536                         | 输入: 1,048,576<br>输出: 65,536                       | **没有区别**。两者都保持了巨大的100万Token上下文窗口，这点非常出色。 |
+| **支持的能力**                    | 支持思考 (Thinking)、代码执行、函数调用、上下文缓存等   | 支持思考 (Thinking)、代码执行、函数调用、上下文缓存等 | **能力上几乎完全相同**。Flash-Lite 并没有因为更轻量而牺牲核心功能。 |
+| **免费套餐速率限制 (Free Tier)**  | **RPM: 10** (每分钟请求数)<br>**RPD: 250** (每天请求数) | **RPM: 15**<br>**RPD: 1,000**                         | **Flash-Lite 的免费额度更慷慨**。它允许更高的请求频率和多达4倍的每日请求量，明确鼓励大规模调用。 |
+| **价格 (付费套餐, 每100万Token)** | 输入: **$0.30**<br>输出: **$2.50**                      | 输入: **$0.10**<br>输出: **$0.40**                    | **这是最核心的区别**。Flash-Lite 的成本极低，输入价格仅为 Flash 的 1/3，输出价格更是不到 Flash 的 1/6。 |
+| **上下文缓存价格**                | 每100万Token **$0.075**                                 | 每100万Token **$0.025**                               | Flash-Lite 的缓存价格同样只有 Flash 的 1/3，进一步降低了连续对话或分析的成本。 |
+| **知识截止日期**                  | 2025年1月                                               | 2025年1月                                             | **没有区别**。                                               |
+
+为 Gemini API 设置代理或自定义接入点的标准方法**不是**在代码中传入 URL，而是通过设置系统**环境变量**来实现的。Python 库会自动识别并使用这些环境变量。
+
+**如何使用自定义 URL (代理)**
+
+如果您需要通过代理访问 Gemini API，请在**启动 NoneBot 之前**，在您的终端中设置环境变量。
+
+**在 Linux / macOS 系统中:**
+
+```
+export HTTPS_PROXY="http://your-proxy-address:port"
+# 然后在同一个终端窗口中启动你的 NoneBot
+nb run
+```
+
+**在 Windows (CMD) 中:**
+
+```
+set HTTPS_PROXY=http://your-proxy-address:port
+# 然后在同一个 CMD 窗口中启动你的 NoneBot
+nb run
+```
+
+**在 Windows (PowerShell) 中:**
+
+```
+$env:HTTPS_PROXY="http://your-proxy-address:port"
+# 然后在同一个 PowerShell 窗口中启动你的 NoneBot
+nb run
+```
+
+这样修改后，代码本身不再处理 URL，而是交由 Python 和 `google-generativeai` 库通过标准方式自动处理，既修复了报错，也让配置更加规范。
+
