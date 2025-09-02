@@ -1,3 +1,5 @@
+# openai.py (独立运行版，不依赖 kawaii-robot)
+
 import configparser
 import openai
 from pathlib import Path
@@ -6,98 +8,99 @@ from nonebot import on_message
 from nonebot.log import logger
 from nonebot.rule import to_me
 from nonebot.matcher import Matcher
-from nonebot.adapters.onebot.v11 import Bot, Event, Message
+from nonebot.adapters.onebot.v11 import MessageEvent, GroupMessageEvent, Message, MessageSegment
 
-# --- 1. 加载配置 ---
-config_path = Path(__file__).parent / "openai_config.ini"
-config = configparser.ConfigParser()
-
-# 检查配置文件是否存在
-if not config_path.exists():
-    raise FileNotFoundError("插件配置文件 'openai_config.ini' 未找到！请根据说明创建。")
-
+# --- 1. 加载 OpenAI 配置 ---
 try:
-    config.read(config_path, encoding='utf-8')
-    api_url = config.get('openai', 'api_url')
-    api_key = config.get('openai', 'api_key')
-    model_id = config.get('openai', 'model_id')
-    model_name = config.get('openai', 'model_name')
-    system_prompt = config.get('openai', 'system_prompt')
+    config_path = Path(__file__).parent / "openai_config.ini"
+    if not config_path.exists():
+        logger.warning("独立OpenAI插件配置文件 'openai_config.ini' 不存在，插件将不会工作。")
+        client = None
+        enabled_groups = []
+    else:
+        config = configparser.ConfigParser()
+        config.read(config_path, encoding='utf-8')
 
-    # 简单验证配置是否为空
-    if not all([api_url, api_key, model_id, model_name, system_prompt]):
-        raise ValueError("config.ini 文件中的配置项不能为空。")
+        api_url = config.get('openai', 'api_url')
+        api_key = config.get('openai', 'api_key')
+        model_id = config.get('openai', 'model_id')
+        model_name = config.get('openai', 'model_name')
+        system_prompt = config.get('openai', 'system_prompt')
 
-except (configparser.NoSectionError, configparser.NoOptionError, ValueError) as e:
-    logger.error(f"读取 config.ini 失败: {e}")
-    # 可以在这里选择停止插件加载或使用默认值
-    raise
+        # 读取并解析群聊白名单
+        enabled_groups_str = config.get('openai', 'enabled_groups', fallback='')
+        if enabled_groups_str:
+            enabled_groups = [group.strip() for group in enabled_groups_str.split(',')]
+            logger.info(f"独立OpenAI插件已加载，将在指定的 {len(enabled_groups)} 个群聊中生效。")
+        else:
+            enabled_groups = []
+            logger.info("独立OpenAI插件已加载，未配置生效群聊，将在所有群聊和私聊中生效。")
 
-# --- 2. 初始化 OpenAI 客户端 ---
-# 使用从配置文件读取的信息来初始化客户端
-client = openai.AsyncOpenAI(
-    base_url=api_url,
-    api_key=api_key,
+        if not all([api_url, api_key, model_id]):
+            raise ValueError("api_url, api_key, and model_id in openai_config.ini cannot be empty.")
+
+        # 初始化 OpenAI 客户端
+        client = openai.AsyncOpenAI(
+            base_url=api_url,
+            api_key=api_key,
+        )
+        logger.info("独立OpenAI插件客户端初始化成功。")
+
+except Exception as e:
+    logger.error(f"加载独立OpenAI插件配置失败: {e}")
+    client = None
+    enabled_groups = []
+
+# --- 2. 创建响应器 ---
+# 优先级设为 10，block=True 表示成功响应后不再传递事件
+chat_matcher = on_message(
+    rule=to_me(),
+    priority=10,
+    block=True
 )
 
-# --- 3. 创建 NoneBot 事件响应器 ---
-# 优先级设置得比较低 (数字越大优先级越低), 确保在其他词库插件之后执行
-# 这样可以实现当其他词库插件未匹配时, 再由本插件进行处理
-chat_matcher = on_message(rule=to_me(), priority=99, block=True)
-
-
 async def get_openai_response(prompt: str) -> str:
-    """
-    异步调用OpenAI兼容API获取回复, 不包含任何记忆功能。
-    """
+    """ 异步调用OpenAI API获取回复 """
+    if not client:
+        return ""
+
     try:
-        # 构建发送给API的消息列表
-        # 每次调用都是一个全新的对话
         messages = [
-            {"role": "system", "content": system_prompt + f"你的名字是{model_name}。"},
+            {"role": "system", "content": system_prompt + f" 你的名字是{model_name}。"},
             {"role": "user", "content": prompt}
         ]
-
-        logger.info(f"向API发送请求: Model={model_id}")
-
-        # 发起API请求
+        logger.info(f"开始调用 OpenAI API (Model: {model_id})")
         response = await client.chat.completions.create(
             model=model_id,
             messages=messages,
-            # 其他参数如 temperature, top_p 等可以根据需要添加
         )
-
-        # 提取并返回助手的回复
         content = response.choices[0].message.content
-        return content.strip() if content else "嗯...我好像不知道该说什么了。"
+        return content.strip() if content else "唔... 我好像不知道该怎么回答了..."
 
-    except openai.APIConnectionError as e:
-        logger.error(f"无法连接到API服务: {e.__cause__}")
-        return "哎呀，我和我的大脑断开连接了，请稍后再试吧！"
-    except openai.RateLimitError:
-        logger.warning("API请求过于频繁，已达到速率限制。")
-        return "你说得太快啦，让我先喘口气！"
-    except openai.APIStatusError as e:
-        logger.error(f"API返回了错误的状态码: {e.status_code}, 响应: {e.response}")
-        return "我的大脑好像出了一点小故障，暂时无法回答你了。"
     except Exception as e:
-        logger.error(f"发生了未预料的错误: {e}")
+        logger.error(f"调用 OpenAI 时发生错误: {e}")
         return "呜...出错了，请联系我的主人检查一下后台日志吧。"
 
-
+# --- 3. 主处理函数 ---
 @chat_matcher.handle()
-async def handle_chat(event: Event, matcher: Matcher):
-    """
-    处理@机器人的消息，调用大模型进行回复。
-    """
-    user_message = event.get_plaintext().strip()
+async def handle_chat(event: MessageEvent, matcher: Matcher):
+    # 如果配置加载失败，则直接结束
+    if not client:
+        await matcher.finish()
 
-    # 如果用户仅@机器人而没有发送任何有效文本，则不作处理
-    if not user_message:
+    # 检查是否为群聊且不在白名单内
+    if isinstance(event, GroupMessageEvent):
+        if enabled_groups and str(event.group_id) not in enabled_groups:
+            logger.info(f"群聊 {event.group_id} 未在白名单中，独立OpenAI插件已跳过。")
+            await matcher.finish() # 直接结束，不响应
+
+    prompt = event.get_plaintext().strip()
+    if not prompt:
         return
 
-    # 调用大模型API获取回复
-    response_text = await get_openai_response(user_message)
+    # 调用API获取回复
+    response_text = await get_openai_response(prompt)
 
-    # 将回复发送给用户
-    await matcher.finish(Message(response_text))
+    if response_text:
+        # @用户 并发送回复
+        await matcher.send(MessageSegment.at(event.get_user_id()) + Message(f"\n{response_text}"))
