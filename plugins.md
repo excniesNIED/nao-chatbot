@@ -320,3 +320,13 @@ ValueError: too many values to unpack (expected 2)
 ```
 
 <img src="https://gastigado.cnies.org/d/project_nonebot_plugin_group_welcome/PixPin_2025_09_01_18_15_05.png?sign=85TMwzimoUlY7A10RaTTQUYIf4uky-SJmFypuO-_oS8=:0" alt="效果图预览" style="zoom:50%;" />
+
+## nonebot-plugin-openai
+
+接入兼容 OpenAI 的 LLM，分为独立版和集成 [nonebot-plugin-kawaii-robot](https://github.com/lgc-NB2Dev/nonebot-plugin-kawaii-robot) 版本。
+
+LLM 相关配置详见 `openai_config.py`
+
+独立版直接放在 `src/plugins` 即可。
+
+集成版需要将相关文件放在 `/root/Lagrange.OneBot/nao/.venv/lib/python3.11/site-packages/nonebot_plugin_kawaii_robot`。LLM 调用优先级低于词库回答。
