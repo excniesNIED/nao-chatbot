@@ -325,7 +325,7 @@ ValueError: too many values to unpack (expected 2)
 
 接入兼容 OpenAI 的 LLM，分为独立版和集成 [nonebot-plugin-kawaii-robot](https://github.com/lgc-NB2Dev/nonebot-plugin-kawaii-robot) 版本。
 
-LLM 相关配置详见 `openai_config.py`
+LLM 相关配置详见 `config.ini`。使用前需要指定URL、API Key、Model ID、System Prompt和群聊白名单等。
 
 独立版直接放在 `src/plugins` 即可。
 
