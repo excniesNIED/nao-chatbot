@@ -1,7 +1,9 @@
-# __main__.py (整合版 Gemini + kawaii-robot 词库)
+# __main__.py (整合 RAG + Gemini + kawaii-robot 词库)
 
 import configparser
 import google.generativeai as genai
+import pandas as pd
+import numpy as np
 from pathlib import Path
 
 from nonebot import on_message
@@ -9,21 +11,30 @@ from nonebot.params import Depends
 from nonebot.log import logger
 from nonebot.rule import to_me
 from nonebot.matcher import Matcher
-# 导入 GroupMessageEvent 用于判断事件类型
 from nonebot.adapters.onebot.v11 import MessageEvent, GroupMessageEvent
 
 from nonebot_plugin_uninfo import get_session, Session
 from .data_source import LOADED_REPLY_DICT
 from .utils import search_reply_dict, choice_reply_from_ev, finish_multi_msg
 
-# --- 加载 Gemini 配置 ---
-try:
-    config_path = Path(__file__).parent / "gemini_config.ini"
-    if not config_path.exists():
-        logger.warning("插件配置文件 'gemini_config.ini' 不存在，将无法使用 AI 对话功能。")
-        gemini_model = None
-        enabled_groups = []
-    else:
+# --- 全局配置和变量 ---
+config_path = Path(__file__).parent / "gemini_config.ini"
+db_path = Path(__file__).parent / "embeddings_database.pkl"
+gemini_model = None
+df_embeddings = None
+enabled_groups = []
+
+# --- 初始化模块 ---
+def setup_plugin():
+    """在插件加载时执行所有初始化操作"""
+    global gemini_model, df_embeddings, enabled_groups
+
+    # 1. 加载 Gemini 配置
+    try:
+        if not config_path.exists():
+            logger.warning("配置文件 'gemini_config.ini' 不存在，AI 功能将无法使用。")
+            return
+
         config = configparser.ConfigParser()
         config.read(config_path, encoding='utf-8')
 
@@ -31,14 +42,8 @@ try:
         gemini_model_name = config.get('gemini', 'gemini_model_name')
         system_prompt = config.get('gemini', 'system_prompt')
 
-        # 读取并解析群聊白名单
         enabled_groups_str = config.get('gemini', 'enabled_groups', fallback='')
-        if enabled_groups_str:
-            enabled_groups = [group.strip() for group in enabled_groups_str.split(',')]
-            logger.info(f"Gemini AI对话功能已加载，将在指定的 {len(enabled_groups)} 个群聊中生效。")
-        else:
-            enabled_groups = []
-            logger.info("Gemini AI对话功能已加载，未配置生效群聊，将在所有群聊和私聊中生效。")
+        enabled_groups = [g.strip() for g in enabled_groups_str.split(',') if g.strip()]
 
         if not all([gemini_api_key, gemini_model_name]):
             raise ValueError("gemini_api_key 和 gemini_model_name 不能为空。")
@@ -49,67 +54,144 @@ try:
             system_instruction=system_prompt,
         )
         logger.info(f"Gemini (Model: {gemini_model_name}) 初始化成功。")
+        if enabled_groups:
+            logger.info(f"AI 对话功能将在 {len(enabled_groups)} 个指定群聊中生效。")
+        else:
+            logger.info("AI 对话功能未限制群聊，将在所有群聊和私聊中生效。")
 
-except Exception as e:
-    logger.error(f"加载 Gemini 配置或初始化模型失败: {e}")
-    gemini_model = None
-    enabled_groups = []
+    except Exception as e:
+        logger.error(f"加载 Gemini 配置或初始化模型失败: {e}")
+        gemini_model = None
+
+    # 2. 加载 Embeddings 数据库
+    try:
+        if db_path.exists():
+            df_embeddings = pd.read_pickle(db_path)
+            logger.info(f"成功加载 Embeddings 数据库，共 {len(df_embeddings)} 条知识。")
+        else:
+            logger.warning(f"Embeddings 数据库 '{db_path.name}' 不存在，知识库问答功能将不可用。")
+    except Exception as e:
+        logger.error(f"加载 Embeddings 数据库失败: {e}")
+        df_embeddings = None
+
+# 在插件加载时执行初始化
+setup_plugin()
+
+# --- RAG 和 AI 对话核心函数 ---
+def find_best_passage(query: str, dataframe: pd.DataFrame, top_k=3):
+    """在向量数据库中查找与问题最相关的文本块"""
+    if dataframe is None or dataframe.empty:
+        return None
+
+    try:
+        query_embedding_result = genai.embed_content(
+            model='embedding-001',
+            content=query,
+            task_type="retrieval_query" # 用于检索的查询
+        )
+        query_embedding = query_embedding_result['embedding']
+
+        # 计算点积相似度
+        dot_products = np.dot(np.stack(dataframe['embeddings']), query_embedding)
+        
+        # 获取相似度最高的 top_k 个索引
+        top_indices = np.argsort(dot_products)[-top_k:][::-1]
+        
+        # 拼接最相关的文本块作为上下文
+        context = "\n---\n".join(dataframe.iloc[idx]['text'] for idx in top_indices)
+        
+        # 你可以增加一个相似度阈值判断，如果最高的相似度都太低，可以认为没有找到相关内容
+        # max_similarity = dot_products[top_indices[0]]
+        # if max_similarity < 0.7: # 阈值需要根据你的数据进行调整
+        #     return None
+
+        return context
+    except Exception as e:
+        logger.error(f"检索知识库时发生错误: {e}")
+        return None
+
+async def get_rag_response(prompt: str) -> str | None:
+    """获取基于知识库的回答 (RAG)"""
+    if not gemini_model or df_embeddings is None:
+        return None
+
+    logger.info("本地词库未命中，开始在知识库中检索...")
+    relevant_passage = find_best_passage(prompt, df_embeddings)
+
+    if not relevant_passage:
+        logger.info("知识库中未找到相关内容。")
+        return None
+
+    logger.info("已在知识库中找到相关上下文，开始生成回答...")
+    
+    # 构建包含上下文的 Prompt
+    rag_prompt = f"""
+    你是一个问答机器人，请根据下面提供的上下文信息来回答用户的问题。
+    请只使用上下文中的信息，如果上下文没有提供足够的信息来回答问题，请直接回复：“根据我现有的知识，我无法回答这个问题。”
+
+    ---
+    上下文信息:
+    {relevant_passage}
+    ---
+    用户问题: {prompt}
+    回答:
+    """
+    
+    try:
+        response = await gemini_model.generate_content_async(rag_prompt)
+        return response.text if response.text else None
+    except Exception as e:
+        logger.error(f"使用 RAG 调用 Gemini 时发生错误: {e}")
+        return "呜...生成回答时出错了，请联系我的主人检查一下后台日志吧。"
+
+async def get_general_gemini_response(prompt: str) -> str:
+    """获取通用的 Gemini 对话回复"""
+    if not gemini_model:
+        return "AI 功能当前不可用哦~"
+    
+    logger.info("知识库检索无果，开始调用通用对话模型...")
+    try:
+        # 使用原始的 system_prompt 进行通用对话
+        chat = gemini_model.start_chat(history=[])
+        response = await chat.send_message_async(prompt)
+        return response.text if response.text else "唔... 我好像不知道该怎么回答了..."
+    except Exception as e:
+        logger.error(f"调用通用 Gemini 对话时发生错误: {e}")
+        return "呜...出错了，请联系我的主人检查一下后台日志吧。"
 
 # --- 创建响应器 ---
 search_matcher = on_message(
     rule=to_me(),
-    priority=10,
+    priority=10, # 保持较高优先级，但可以根据需要调整
     block=True
 )
-
-async def get_gemini_response(prompt: str) -> str:
-    """ 异步调用 Google Gemini API 获取回复。 """
-    if not gemini_model:
-        return ""
-
-    try:
-        chat = gemini_model.start_chat(history=[])
-        logger.info(f"词库未命中，开始调用 Gemini API (Model: {gemini_model.model_name})")
-        response = await chat.send_message_async(prompt)
-        return response.text if response.text else "唔... 我好像不知道该怎么回答了..."
-
-    except Exception as e:
-        logger.error(f"调用 Gemini 时发生错误: {e}")
-        return "呜...出错了，请联系我的主人检查一下后台日志吧。"
-
 
 # --- 主处理函数 ---
 @search_matcher.handle()
 async def _(event: MessageEvent, ss: Session = Depends(get_session)):
     msg = event.get_plaintext().strip()
-
     if not msg:
         return
 
-    # 1. 检查本地词库
+    # 步骤 1: 检查本地词库
     if reply_list := search_reply_dict(LOADED_REPLY_DICT, msg):
         logger.info(f"消息在本地词库命中: '{msg}'")
         formatted_messages = await choice_reply_from_ev(ss, reply_list)
         await finish_multi_msg(formatted_messages)
+        return
 
-    # 2. 如果本地词库未命中，则判断是否调用 Gemini
-    else:
-        # 检查是否为群聊且不在白名单内
-        if isinstance(event, GroupMessageEvent):
-            if enabled_groups and str(event.group_id) not in enabled_groups:
-                logger.info(f"群聊 {event.group_id} 未在AI对话白名单中，已跳过。")
-                await search_matcher.finish() # 结束处理
+    # AI 功能的权限检查
+    if isinstance(event, GroupMessageEvent):
+        if enabled_groups and str(event.group_id) not in enabled_groups:
+            logger.info(f"群聊 {event.group_id} 未在AI对话白名单中，已跳过。")
+            return # 直接结束，不再响应
 
-        # 如果检查通过 (是私聊，或在白名单群聊中，或未设置白名单)，则继续调用AI
-        response_text = await get_gemini_response(msg)
+    # 步骤 2: 尝试从知识库 (RAG) 获取回答
+    rag_response_text = await get_rag_response(msg)
+    if rag_response_text:
+        await search_matcher.finish(rag_response_text)
+        return
 
-        if not response_text:
-            logger.warning("AI功能未启用或未能生成回复，已跳过。")
-            await search_matcher.finish()
-
-        # 使用与可爱机器人插件相同的回复格式发送消息
-        reply_template = "{at}\n{ai_response}"
-        formatted_messages = await choice_reply_from_ev(
-            ss, [reply_template], ai_response=response_text
-        )
-        await finish_multi_msg(formatted_messages)
+    # 步骤 3: Fallback 到通用对话模型
+    general_response_text = await get_general_gemini_response(msg)
+    await search_matcher.finish(general_response_text)
