@@ -1,4 +1,4 @@
-# __main__.py (混合模式: OpenAI for RAG search, Gemini for Generation)
+# __main__.py (混合模式: OpenAI for RAG search, Gemini for Generation, 统一回复格式)
 
 import configparser
 import google.generativeai as genai
@@ -104,7 +104,6 @@ def find_best_passage_with_openai(query: str, dataframe: pd.DataFrame, top_k=3):
         return None
 
     try:
-        # 使用 OpenAI API 为用户问题创建 embedding
         response = openai_client.embeddings.create(
             input=[query],
             model=openai_embedding_model
@@ -147,7 +146,6 @@ async def get_rag_response(prompt: str) -> str | None:
     """
     
     try:
-        # 使用 Gemini 生成最终回答
         response = await gemini_model.generate_content_async(rag_prompt)
         return response.text if response.text else None
     except Exception as e:
@@ -195,12 +193,18 @@ async def _(event: MessageEvent, ss: Session = Depends(get_session)):
             logger.info(f"群聊 {event.group_id} 未在AI对话白名单中，已跳过。")
             return
 
+    # 为 API 回复定义一个统一的模板，包含 {at} 变量
+    reply_template = "{at}\n{response}"
+    response_text = ""
+
     # 步骤 2: 尝试从知识库 (RAG) 获取回答
     rag_response_text = await get_rag_response(msg)
     if rag_response_text:
-        await search_matcher.finish(rag_response_text)
-        return
+        response_text = rag_response_text
+    else:
+        # 步骤 3: Fallback 到通用对话模型
+        response_text = await get_general_gemini_response(msg)
 
-    # 步骤 3: Fallback 到通用对话模型
-    general_response_text = await get_general_gemini_response(msg)
-    await search_matcher.finish(general_response_text)
+    # 使用与本地词库相同的格式化工具来发送包含 @ 的回复
+    formatted_messages = await choice_reply_from_ev(ss, [reply_template], response=response_text)
+    await finish_multi_msg(formatted_messages)
