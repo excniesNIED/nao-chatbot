@@ -3,7 +3,7 @@
 ## 入群欢迎
 
 热烈欢迎新成员加入！这里是山东师范大学信息科学与工程学院机器人实验室纳新群。我是小Nao，任何问题都可以随时可以向我咨询。
-进群后请将群名片修改为专业+班级+姓名（例如：计工本2303赵恒堂）
+进群后请将阅读群公告，并将群名片修改为专业+班级+姓名（例如：计工本2303赵恒堂）
 暂时没有头绪？试试艾特我并发送"help"（@小Nao help），一键解锁指南～
 
 <img src="https://gastigado.cnies.org/d/nao/211meme.png?sign=RVSEKYWMi1Y71T2MYWA5b5-ZBIWMya3cmFcEMBiyBVs=:0" style="zoom:10%;" />
