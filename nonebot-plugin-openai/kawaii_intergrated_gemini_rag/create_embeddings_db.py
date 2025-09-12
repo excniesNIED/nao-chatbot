@@ -1,7 +1,7 @@
 # create_embeddings_db.py
 import google.generativeai as genai
 import pandas as pd
-import pypdf2
+import PyPDF2
 import markdown
 import re
 from pathlib import Path
