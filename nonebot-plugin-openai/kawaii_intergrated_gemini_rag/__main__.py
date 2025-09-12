@@ -1,7 +1,8 @@
-# __main__.py (整合 RAG + Gemini + kawaii-robot 词库)
+# __main__.py (混合模式: OpenAI for RAG search, Gemini for Generation)
 
 import configparser
 import google.generativeai as genai
+from openai import OpenAI
 import pandas as pd
 import numpy as np
 from pathlib import Path
@@ -18,52 +19,71 @@ from .data_source import LOADED_REPLY_DICT
 from .utils import search_reply_dict, choice_reply_from_ev, finish_multi_msg
 
 # --- 全局配置和变量 ---
-config_path = Path(__file__).parent / "gemini_config.ini"
+gemini_config_path = Path(__file__).parent / "gemini_config.ini"
+openai_config_path = Path(__file__).parent / "openai_config.ini"
 db_path = Path(__file__).parent / "embeddings_database.pkl"
+
 gemini_model = None
+openai_client = None
+openai_embedding_model = None
 df_embeddings = None
 enabled_groups = []
 
 # --- 初始化模块 ---
 def setup_plugin():
     """在插件加载时执行所有初始化操作"""
-    global gemini_model, df_embeddings, enabled_groups
+    global gemini_model, openai_client, openai_embedding_model, df_embeddings, enabled_groups
 
-    # 1. 加载 Gemini 配置
+    # 1. 加载 Gemini 配置 (用于对话生成)
     try:
-        if not config_path.exists():
-            logger.warning("配置文件 'gemini_config.ini' 不存在，AI 功能将无法使用。")
-            return
-
-        config = configparser.ConfigParser()
-        config.read(config_path, encoding='utf-8')
-
-        gemini_api_key = config.get('gemini', 'gemini_api_key')
-        gemini_model_name = config.get('gemini', 'gemini_model_name')
-        system_prompt = config.get('gemini', 'system_prompt')
-
-        enabled_groups_str = config.get('gemini', 'enabled_groups', fallback='')
-        enabled_groups = [g.strip() for g in enabled_groups_str.split(',') if g.strip()]
-
-        if not all([gemini_api_key, gemini_model_name]):
-            raise ValueError("gemini_api_key 和 gemini_model_name 不能为空。")
-
-        genai.configure(api_key=gemini_api_key)
-        gemini_model = genai.GenerativeModel(
-            gemini_model_name,
-            system_instruction=system_prompt,
-        )
-        logger.info(f"Gemini (Model: {gemini_model_name}) 初始化成功。")
-        if enabled_groups:
-            logger.info(f"AI 对话功能将在 {len(enabled_groups)} 个指定群聊中生效。")
+        if not gemini_config_path.exists():
+            logger.warning("配置文件 'gemini_config.ini' 不存在，AI 对话功能将无法使用。")
         else:
-            logger.info("AI 对话功能未限制群聊，将在所有群聊和私聊中生效。")
+            gemini_config = configparser.ConfigParser()
+            gemini_config.read(gemini_config_path, encoding='utf-8')
 
+            gemini_api_key = gemini_config.get('gemini', 'gemini_api_key')
+            gemini_model_name = gemini_config.get('gemini', 'gemini_model_name')
+            system_prompt = gemini_config.get('gemini', 'system_prompt')
+            enabled_groups_str = gemini_config.get('gemini', 'enabled_groups', fallback='')
+            enabled_groups = [g.strip() for g in enabled_groups_str.split(',') if g.strip()]
+
+            if not all([gemini_api_key, gemini_model_name]):
+                raise ValueError("gemini_api_key 和 gemini_model_name 不能为空。")
+
+            genai.configure(api_key=gemini_api_key)
+            gemini_model = genai.GenerativeModel(
+                gemini_model_name,
+                system_instruction=system_prompt,
+            )
+            logger.info(f"Gemini (Model: {gemini_model_name}) 初始化成功，用于对话生成。")
     except Exception as e:
         logger.error(f"加载 Gemini 配置或初始化模型失败: {e}")
         gemini_model = None
 
-    # 2. 加载 Embeddings 数据库
+    # 2. 加载 OpenAI 配置 (用于 RAG 检索)
+    try:
+        if not openai_config_path.exists():
+             logger.warning("配置文件 'openai_config.ini' 不存在，知识库检索功能将无法使用。")
+        else:
+            openai_config = configparser.ConfigParser()
+            openai_config.read(openai_config_path, encoding='utf-8')
+
+            api_url = openai_config.get('openai', 'api_url')
+            api_key = openai_config.get('openai', 'api_key')
+            openai_embedding_model = openai_config.get('openai', 'embedding_model_id')
+
+            if not all([api_url, api_key, openai_embedding_model]):
+                 raise ValueError("请确保 openai_config.ini 中已正确配置 api_url, api_key, 和 embedding_model_id。")
+
+            openai_client = OpenAI(base_url=api_url, api_key=api_key)
+            logger.info(f"OpenAI 客户端初始化成功 (Model: {openai_embedding_model})，用于知识库检索。")
+    except Exception as e:
+        logger.error(f"加载 OpenAI 配置或初始化客户端失败: {e}")
+        openai_client = None
+
+
+    # 3. 加载 Embeddings 数据库
     try:
         if db_path.exists():
             df_embeddings = pd.read_pickle(db_path)
@@ -78,53 +98,42 @@ def setup_plugin():
 setup_plugin()
 
 # --- RAG 和 AI 对话核心函数 ---
-def find_best_passage(query: str, dataframe: pd.DataFrame, top_k=3):
-    """在向量数据库中查找与问题最相关的文本块"""
-    if dataframe is None or dataframe.empty:
+def find_best_passage_with_openai(query: str, dataframe: pd.DataFrame, top_k=3):
+    """【使用 OpenAI API】在向量数据库中查找与问题最相关的文本块"""
+    if dataframe is None or dataframe.empty or openai_client is None:
         return None
 
     try:
-        query_embedding_result = genai.embed_content(
-            model='embedding-001',
-            content=query,
-            task_type="retrieval_query" # 用于检索的查询
+        # 使用 OpenAI API 为用户问题创建 embedding
+        response = openai_client.embeddings.create(
+            input=[query],
+            model=openai_embedding_model
         )
-        query_embedding = query_embedding_result['embedding']
+        query_embedding = response.data[0].embedding
 
-        # 计算点积相似度
         dot_products = np.dot(np.stack(dataframe['embeddings']), query_embedding)
-        
-        # 获取相似度最高的 top_k 个索引
         top_indices = np.argsort(dot_products)[-top_k:][::-1]
-        
-        # 拼接最相关的文本块作为上下文
         context = "\n---\n".join(dataframe.iloc[idx]['text'] for idx in top_indices)
         
-        # 你可以增加一个相似度阈值判断，如果最高的相似度都太低，可以认为没有找到相关内容
-        # max_similarity = dot_products[top_indices[0]]
-        # if max_similarity < 0.7: # 阈值需要根据你的数据进行调整
-        #     return None
-
         return context
     except Exception as e:
-        logger.error(f"检索知识库时发生错误: {e}")
+        logger.error(f"使用 OpenAI API 检索知识库时发生错误: {e}")
         return None
 
 async def get_rag_response(prompt: str) -> str | None:
     """获取基于知识库的回答 (RAG)"""
-    if not gemini_model or df_embeddings is None:
+    if df_embeddings is None:
         return None
 
-    logger.info("本地词库未命中，开始在知识库中检索...")
-    relevant_passage = find_best_passage(prompt, df_embeddings)
+    logger.info("本地词库未命中，开始在知识库中检索 (using OpenAI Embeddings)...")
+    relevant_passage = find_best_passage_with_openai(prompt, df_embeddings)
 
     if not relevant_passage:
         logger.info("知识库中未找到相关内容。")
         return None
 
-    logger.info("已在知识库中找到相关上下文，开始生成回答...")
+    logger.info("已在知识库中找到相关上下文，开始生成回答 (using Gemini)...")
     
-    # 构建包含上下文的 Prompt
     rag_prompt = f"""
     你是一个问答机器人，请根据下面提供的上下文信息来回答用户的问题。
     请只使用上下文中的信息，如果上下文没有提供足够的信息来回答问题，请直接回复：“根据我现有的知识，我无法回答这个问题。”
@@ -138,10 +147,11 @@ async def get_rag_response(prompt: str) -> str | None:
     """
     
     try:
+        # 使用 Gemini 生成最终回答
         response = await gemini_model.generate_content_async(rag_prompt)
         return response.text if response.text else None
     except Exception as e:
-        logger.error(f"使用 RAG 调用 Gemini 时发生错误: {e}")
+        logger.error(f"使用 RAG 调用 Gemini 生成回答时发生错误: {e}")
         return "呜...生成回答时出错了，请联系我的主人检查一下后台日志吧。"
 
 async def get_general_gemini_response(prompt: str) -> str:
@@ -149,9 +159,8 @@ async def get_general_gemini_response(prompt: str) -> str:
     if not gemini_model:
         return "AI 功能当前不可用哦~"
     
-    logger.info("知识库检索无果，开始调用通用对话模型...")
+    logger.info("知识库检索无果，开始调用通用对话模型 (using Gemini)...")
     try:
-        # 使用原始的 system_prompt 进行通用对话
         chat = gemini_model.start_chat(history=[])
         response = await chat.send_message_async(prompt)
         return response.text if response.text else "唔... 我好像不知道该怎么回答了..."
@@ -162,7 +171,7 @@ async def get_general_gemini_response(prompt: str) -> str:
 # --- 创建响应器 ---
 search_matcher = on_message(
     rule=to_me(),
-    priority=10, # 保持较高优先级，但可以根据需要调整
+    priority=10,
     block=True
 )
 
@@ -184,7 +193,7 @@ async def _(event: MessageEvent, ss: Session = Depends(get_session)):
     if isinstance(event, GroupMessageEvent):
         if enabled_groups and str(event.group_id) not in enabled_groups:
             logger.info(f"群聊 {event.group_id} 未在AI对话白名单中，已跳过。")
-            return # 直接结束，不再响应
+            return
 
     # 步骤 2: 尝试从知识库 (RAG) 获取回答
     rag_response_text = await get_rag_response(msg)

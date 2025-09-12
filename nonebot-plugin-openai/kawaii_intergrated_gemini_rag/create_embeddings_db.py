@@ -1,4 +1,4 @@
-# create_embeddings_db.py
+# create_embeddings_db.py (已添加延迟以适应免费额度)
 import google.generativeai as genai
 import pandas as pd
 import PyPDF2
@@ -7,14 +7,16 @@ import re
 from pathlib import Path
 import configparser
 from nonebot.log import logger
+import time # 引入 time 模块
 
 # --- 配置 ---
 
 # ↓↓↓ 在这个列表中指定你要向量化的知识库文件名 ↓↓↓
+# !! 注意：每个文件名都是独立的字符串，用逗号隔开
 DOCUMENTS_TO_PROCESS = [
-    "q&a.md",
-    "reference.pdf"
-    # 如果有更多文件，继续在这里添加，例如: "another_doc.md"
+    "q_a.md",
+    "reference1.pdf",
+    "reference2.pdf"
 ]
 
 CONFIG_PATH = Path(__file__).parent / "gemini_config.ini"
@@ -22,8 +24,7 @@ DOCS_PATH = Path(__file__).parent
 DB_SAVE_PATH = Path(__file__).parent / "embeddings_database.pkl"
 MODEL_ID = "embedding-001"
 
-
-# --- 文本处理函数 ---
+# --- 文本处理函数 (与之前相同，此处省略以保持简洁) ---
 def read_pdf(file_path: Path) -> str:
     """读取PDF文件内容"""
     try:
@@ -61,10 +62,11 @@ def split_text_into_chunks(text: str, max_chunk_size=1000, overlap=100) -> list[
         start += max_chunk_size - overlap
     return chunks
 
+
 # --- 主函数 ---
 def create_and_save_embeddings():
     """主函数，用于创建和保存文本嵌入"""
-    # 1. 加载API Key
+    # 1. 加载API Key (与之前相同)
     try:
         config = configparser.ConfigParser()
         config.read(CONFIG_PATH, encoding='utf-8')
@@ -78,7 +80,7 @@ def create_and_save_embeddings():
         logger.error(f"加载配置文件失败: {e}")
         return
 
-    # 2. 读取所有指定文档并分块
+    # 2. 读取所有指定文档并分块 (与之前相同)
     all_chunks = []
     doc_files_to_process = [DOCS_PATH / f for f in DOCUMENTS_TO_PROCESS]
 
@@ -96,9 +98,6 @@ def create_and_save_embeddings():
             content = read_pdf(doc_file)
         elif doc_file.suffix == '.md':
             content = read_md(doc_file)
-        # 你可以根据需要添加对其他文件类型（如 .txt）的支持
-        # elif doc_file.suffix == '.txt':
-        #     content = read_txt(doc_file)
 
         if content:
             chunks = split_text_into_chunks(content)
@@ -109,21 +108,31 @@ def create_and_save_embeddings():
         logger.error("未能从指定文档中提取任何文本内容，Embeddings 数据库创建失败。")
         return
 
-    # 3. 为每个块生成Embeddings
-    logger.info(f"开始为 {len(all_chunks)} 个文本块生成 Embeddings，这可能需要一些时间...")
+    # 3. 【修改部分】为每个块生成Embeddings，并加入延迟
+    logger.info(f"开始为 {len(all_chunks)} 个文本块逐个生成 Embeddings...")
+    embeddings_list = []
     try:
-        result = genai.embed_content(
-            model=MODEL_ID,
-            content=all_chunks,
-            task_type="retrieval_document"
-        )
-        embeddings = result['embedding']
-        logger.success(f"成功生成 {len(embeddings)} 条 Embeddings。")
+        for i, chunk in enumerate(all_chunks):
+            logger.info(f"正在处理第 {i+1}/{len(all_chunks)} 个文本块...")
+            
+            # 调用 API
+            result = genai.embed_content(
+                model=MODEL_ID,
+                content=chunk,
+                task_type="retrieval_document"
+            )
+            embeddings_list.append(result['embedding'])
+            
+            # 在每次调用后暂停，以避免超出速率限制
+            # 免费版限制为 15 RPM (每分钟15次)，4秒一次比较安全
+            time.sleep(4) 
+
+        logger.success(f"成功生成 {len(embeddings_list)} 条 Embeddings。")
 
         # 4. 创建DataFrame并保存
         df = pd.DataFrame({
             'text': all_chunks,
-            'embeddings': list(embeddings)
+            'embeddings': embeddings_list
         })
         df.to_pickle(DB_SAVE_PATH)
         logger.success(f"Embeddings 数据库已成功创建并保存至: {DB_SAVE_PATH}")
@@ -131,6 +140,6 @@ def create_and_save_embeddings():
     except Exception as e:
         logger.error(f"生成 Embeddings 或保存数据库时发生错误: {e}")
 
+
 if __name__ == "__main__":
-    # 直接运行此脚本
     create_and_save_embeddings()
