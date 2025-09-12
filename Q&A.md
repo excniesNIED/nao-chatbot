@@ -162,12 +162,13 @@ NAO机器人：提供NAO机器人从入门到进阶的完整学习资料，包�
 想证明自己的工程实践能力吗？为培养和评估大家的工程素养与动手能力，实验室设立工程实践考核通道，完成考核提交至指定仓库，就能免笔试直通面试！💪 
 别担心零基础，我们看中的是你解决问题的毅力和学习能力～鼓励查阅资料、借助AI工具，但实践总结必须亲自完成！❌ 提交内容会进行AI检测，复制粘贴直接无效哦～ 
 最有价值的不是完美程序，而是详尽记录的学习过程与思考！快来看看题目详情吧～如有问题可以在群里和师哥师姐讨论。
+考核说明、提交要求和截止时间详见“题目说明”。
 
-题目说明：https://sdnuroboticsailab.github.io/others/2025-autumn-engineering-challenges/
+题目说明：https://sdnuroboticsailab.github.io/orientation/2025/2025-autumn-engineering-challenges/
 代码仓库：https://github.com/SDNURoboticsAILab/2025AutumnEngineeringChallenges
-题目一：https://sdnuroboticsailab.github.io/others/2025-aec-01-yolo/
-题目二：https://sdnuroboticsailab.github.io/others/2025-aec-02-raspi/
-题目三：https://sdnuroboticsailab.github.io/others/2025-aec-03-docker/
+题目一：https://sdnuroboticsailab.github.io/orientation/2025/2025-aec-01-yolo/
+题目二：https://sdnuroboticsailab.github.io/orientation/2025/2025-aec-02-raspi/
+题目三：https://sdnuroboticsailab.github.io/orientation/2025/2025-aec-03-docker/
 
 ## 加入实验室前准备什么
 
