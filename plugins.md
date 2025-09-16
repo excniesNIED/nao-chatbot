@@ -247,6 +247,7 @@ ValueError: too many values to unpack (expected 2)
 - **持久化记录**: 用户违规次数会被记录在本地，即使机器人重启也不会丢失。
 - **管理员豁免**: 自动忽略群主和管理员的消息，防止误判。
 - **详细日志**: 所有检测和处理操作都会以Unix日志风格记录到本地文件 `noadpls.txt` 中，方便追溯。
+- `recomendgroupban.py` 可以检测推荐群聊、推荐联系人卡片
 
 ### 🔧 配置
 
