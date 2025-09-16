@@ -225,7 +225,7 @@ ValueError: too many values to unpack (expected 2)
 
 ### 使用方法
 
-将 `welcome.py` 放置在 NoneBot 项目的 `src/plugins` 目录下。修改第23行的图片显示和第34行的欢迎语即可。
+将 `welcome.py` 放置在 NoneBot 项目的 `src/plugins` 目录下。修改第8行白名单、第23行的图片显示和第34行的欢迎语即可。
 
 ### 注意事项
 
