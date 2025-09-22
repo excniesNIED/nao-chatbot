@@ -380,3 +380,20 @@ nb run
 
 这样修改后，代码本身不再处理 URL，而是交由 Python 和 `google-generativeai` 库通过标准方式自动处理，既修复了报错，也让配置更加规范。
 
+
+
+
+
+https://github.com/LagrangeDev/Lagrange.Core
+
+https://github.com/LagrangeDev/Lagrange.Core/issues/715
+
+https://github.com/LagrangeDev/Lagrange.Core/issues/891
+
+https://github.com/sealdice/sealdice-core/issues/1168#issuecomment-2566279137
+
+https://github.com/sealdice/sealdice-core/pull/1388
+
+https://lagrangedev.github.io/Lagrange.Doc/v1/Lagrange.OneBot/Config/
+
+https://lagrangedev.github.io/lagrange-config-generator/
